@@ -1,0 +1,119 @@
+name: Weekly Project Cleanup & Velocity Report
+
+on:
+  schedule:
+    # Runs every Sunday night at 23:59 UTC
+    - cron: '59 23 * * 7'
+  workflow_dispatch: # Allows you to trigger it manually for testing
+
+jobs:
+  calculate-velocity-and-clean:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Calculate Completed Estimation Points
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.PROJECT_AUTOMATION_TOKEN }}
+          script: |
+            // Define your project configurations
+            const owner = context.repo.owner;
+            const project_name = "STL-CDS"; 
+            
+            // GraphQL Query to fetch items from the 'Done' column
+            const query = `
+              query($owner: String!) {
+                user(login: $owner) {
+                  projectsV2(first: 10) {
+                    nodes {
+                      id
+                      title
+                      fields(first: 20) {
+                        nodes {
+                          ... on ProjectV2FieldCommon {
+                            id
+                            name
+                          }
+                        }
+                      }
+                      items(first: 100) {
+                        nodes {
+                          id
+                          fieldValues(first: 20) {
+                            nodes {
+                              ... on ProjectV2ItemFieldSingleSelectValue {
+                                name
+                                field { ... on ProjectV2FieldCommon { name } }
+                              }
+                              ... on ProjectV2ItemFieldNumberValue {
+                                number
+                                field { ... on ProjectV2FieldCommon { name } }
+                              }
+                              ... on ProjectV2ItemFieldTextValue {
+                                text
+                                field { ... on ProjectV2FieldCommon { name } }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            `;
+            
+            const result = await github.graphql(query, { owner });
+            const project = result.user.projectsV2.nodes.find(p => p.title.includes(project_name));
+            
+            if (!project) {
+              core.setFailed(`Project matching "${project_name}" not found.`);
+              return;
+            }
+
+            let totalVelocity = 0;
+            let archivedCount = 0;
+
+            for (const item of project.items.nodes) {
+              let isDone = false;
+              let estimate = 0;
+
+              for (const val of item.fieldValues.nodes) {
+                if (val.field?.name === 'Status' && val.name === 'Done') {
+                  isDone = true;
+                }
+                if (val.field?.name === 'Estimate' && val.number) {
+                  estimate = val.number;
+                }
+              }
+
+              // If the item is in the 'Done' column, accumulate points and archive it
+              if (isDone) {
+                totalVelocity += estimate;
+                archivedCount++;
+
+                // GraphQL Mutation to archive the completed item
+                const archiveMutation = `
+                  mutation($projectId: ID!, $itemId: ID!) {
+                    archiveProjectV2Item(input: {projectId: $projectId, itemId: $itemId}) {
+                      item { id }
+                    }
+                  }
+                `;
+                await github.graphql(archiveMutation, { projectId: project.id, itemId: item.id });
+              }
+            }
+
+            core.info(`Successfully compiled weekly velocity.`);
+            core.info(`Total Velocity Score: ${totalVelocity} Days`);
+            core.info(`Archived items: ${archivedCount}`);
+            
+            // Set outputs for logging summary
+            core.exportVariable('WEEKLY_VELOCITY', totalVelocity);
+            core.exportVariable('ITEMS_ARCHIVED', archivedCount);
+
+      - name: Generate Job Summary Report
+        run: |
+          echo "## 📊 Weekly Project Automation Summary" >> $GITHUB_STEP_SUMMARY
+          echo "* **Completed Weekly Velocity:** ${{ env.WEEKLY_VELOCITY }} Developer Days" >> $GITHUB_STEP_SUMMARY
+          echo "* **Total Cards Archived to History:** ${{ env.ITEMS_ARCHIVED }}" >> $GITHUB_STEP_SUMMARY
+          echo "All completed tasks have been systematically cleared from the active board view to keep your workflow optimal for next week." >> $GITHUB_STEP_SUMMARY

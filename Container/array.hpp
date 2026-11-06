@@ -88,6 +88,7 @@ namespace Container{
             Array& operator+=(const T& item);
             Array& operator+=(T&& item);
             Array& operator-=(const T& item);
+            T* data() noexcept;
 
             explicit operator bool() const noexcept;
 
@@ -104,7 +105,7 @@ namespace Container{
             friend std::istream& operator>>(std::istream& writter, Array& source){
                 T temp;
                 while(writter >> temp){
-                    source.append(temp);
+                    (void)source.append(temp);
                     if(writter.eof() || writter.peek() == '\n') break;
                 }
                 writter.clear();
@@ -113,15 +114,15 @@ namespace Container{
 
             friend Array operator+(const Array& lhs, const Array& rhs){
                 Array<T> temp(lhs.len()+rhs.len());
-                for(std::size_t i{}; i<lhs.len(); ++i) temp.append(lhs[i]);
-                for(std::size_t i{}; i<rhs.len(); ++i) temp.append(rhs[i]);
+                for(std::size_t i{}; i<lhs.len(); ++i) (void)temp.append(lhs[i]);
+                for(std::size_t i{}; i<rhs.len(); ++i) (void)temp.append(rhs[i]);
                 return temp;
             }
 
             friend Array operator+(const Array& lhs, const T& rhs){
                 Array<T> temp(lhs.len()+1);
-                for(std::size_t i{}; i<lhs.len(); ++i) temp.append(lhs[i]);
-                temp.append(rhs);
+                for(std::size_t i{}; i<lhs.len(); ++i) (void)temp.append(lhs[i]);
+                (void)temp.append(rhs);
                 return temp;
             }
 
@@ -129,14 +130,14 @@ namespace Container{
                 Array<T> temp{lhs.len()};
                 for(std::size_t i{}; i<lhs.len(); ++i){
                     for(std::size_t j{}; j<rhs.len(); ++j) if (lhs[i] == rhs[j]) continue;
-                    temp.append(lhs[i]);
+                    (void)temp.append(lhs[i]);
                 }
                 return temp;
             }
 
             friend Array operator-(const Array& lhs, const T& rhs){
                 Array<T> temp{lhs.len()};
-                for(std::size_t i{}; i<lhs.len(); ++i) if(lhs[i] != rhs) temp.append(lhs[i]);
+                for(std::size_t i{}; i<lhs.len(); ++i) if(lhs[i] != rhs) (void)temp.append(lhs[i]);
                 return temp;
             }
 
@@ -146,7 +147,7 @@ namespace Container{
                     {a*b} -> std::convertible_to<T>;
                 }{
                     Array<T> temp{lhs.len()};
-                    for(const T& item : temp) temp.append(item*rhs);
+                    for(const T& item : temp) (void)temp.append(item*rhs);
                     return temp;
                 }
 
@@ -155,6 +156,7 @@ namespace Container{
                 using pointer           = T*;
                 using reference         = T&;
                 using value_type        = T;
+                using difference_type   = std::ptrdiff_t;
 
                 value_type* m_ptr;
                 
@@ -172,6 +174,9 @@ namespace Container{
                 friend bool operator!=(const iterator& lhs, const iterator& rhs){
                     return lhs.m_ptr != rhs.m_ptr;
                 }
+                friend difference_type operator-(const iterator& lhs, const iterator& rhs){
+                    return lhs.m_ptr - rhs.m_ptr;
+                }
 
             };
 
@@ -179,6 +184,7 @@ namespace Container{
                 using pointer           = const T*;
                 using reference         = const T&;
                 using value_type        = const T;
+                using difference_type   = std::ptrdiff_t;
 
                 value_type* m_ptr;
                 
@@ -195,6 +201,10 @@ namespace Container{
                 }
                 friend bool operator!=(const const_iterator& lhs, const const_iterator& rhs){
                     return lhs.m_ptr != rhs.m_ptr;
+                }
+
+                friend difference_type operator-(const const_iterator& lhs, const const_iterator& rhs){
+                    return lhs.m_ptr - rhs.m_ptr;
                 }
 
             };
@@ -637,6 +647,11 @@ namespace Container{
     template <Custom T>
     Array<T>::operator bool() const noexcept{
         return (counter > 0 && counter != npos) ? true : false;
+    }
+
+    template <Custom T>
+    T* Array<T>::data() noexcept{
+        return arr;
     }
 
     // Array iterator func

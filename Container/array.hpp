@@ -8,6 +8,8 @@
 #include <cstddef>
 #include <utility>
 #include <exception>
+#include <ostream>
+#include <istream>
 
 namespace Container{
     template <typename T> concept Custom = sizeof(T) <= 24;
@@ -27,6 +29,16 @@ namespace Container{
             const char* message;
         public:
             UnderFlowException(const char* ms = "Underflow exception occoured") : message(ms) {}
+            const char* what() const override{
+                return message;
+            }
+    };
+
+    class SerializationDeserializationError : public std::exception{
+        private:
+            const char* message;
+        public:
+            SerializationDeserializationError(const char* ms = "Object can't be serialized or deserialized") : message(ms){}
             const char* what() const override{
                 return message;
             }
@@ -82,7 +94,7 @@ namespace Container{
             std::size_t maxCapacity() const noexcept;
 
             // Utils Functions
-            std::size_t memory(bool flag = false) const noexcept; // how much memory current elements are taking (flag), both initialized and uninitialized elements (!flag)
+            [[nodiscard]] std::size_t memory(bool flag = false) const noexcept; // how much memory current elements are taking (flag), both initialized and uninitialized elements (!flag)
 
             // Programmer Friendly Functions
             Array& operator+=(const T& item);
@@ -91,6 +103,9 @@ namespace Container{
             T* data() noexcept;
 
             explicit operator bool() const noexcept;
+            
+            void serialize(std::ostream& writter) const;
+            void deserialize(std::istream& reader);
 
             // Friend Functions
             friend std::ostream& operator<<(std::ostream& printer, const Array& source){
@@ -652,6 +667,86 @@ namespace Container{
     template <Custom T>
     T* Array<T>::data() noexcept{
         return arr;
+    }
+
+    template <Custom T>
+    void Array<T>::serialize(std::ostream& writter) const{
+        auto cursor = writter.tellp();
+        if constexpr(std::is_trivially_copyable_v<T>){
+            try{
+                writter.write(reinterpret_cast<const char*>(&m_capacity), sizeof(m_capacity));
+                writter.write(reinterpret_cast<const char*>(&counter), sizeof(counter));
+                writter.write(reinterpret_cast<const char*>(arr), sizeof(T)*counter);
+            }catch(...){
+                writter.seekp(cursor);
+                throw;
+            }
+        }else if constexpr(requires{
+            typename T::serializable;
+            requires std::is_same_v<typename T::serializable, std::true_type>;
+        }){
+            try{
+                writter.write(reinterpret_cast<const char*>(&m_capacity), sizeof(m_capacity));
+                writter.write(reinterpret_cast<const char*>(&counter), sizeof(counter));
+                for(std::size_t i{}; i<counter; ++i) arr[i].serialize(writter);
+            }catch(...){
+                std::ostream::seekp(cursor);
+                throw;
+            }
+        }else{
+            throw SerializationDeserializationError{"Can't serialize object T"};
+        }
+    }
+
+    template <Custom T>
+    void Array<T>::deserialize(std::istream& reader){
+        std::size_t new_m_capacity,
+                    new_counter;
+        if constexpr(std::is_trivially_copyable_v<T>){
+            try{
+                reader.read(reinterpret_cast<char*>(&new_m_capacity), sizeof(new_m_capacity));
+                reader.read(reinterpret_cast<char*>(&new_counter), sizeof(new_counter));
+                if(new_m_capacity > m_capacity) throw SerializationDeserializationError{"Current array has a smaller capacity compared to one in disk"};
+                if(new_counter > m_capacity) throw SerializationDeserializationError{"Data in Disk might be corrupted, m_capacity is lower than counter"};
+                // back to action
+                while(counter > 0) arr[--counter].~T();
+                reader.read(reinterpret_cast<char*>(arr), sizeof(T)*new_counter);
+                counter = new_counter;
+            }catch(...){
+                // Still to figure out
+                throw;
+            }
+        }else if constexpr(requires{
+            typename T::serializable;
+            requires std::is_same_v<typename T::serializable, std::true_type>;
+        }){
+            std::size_t items{0};
+            T* temp_arr{nullptr};
+            try{
+                reader.read(reinterpret_cast<char*>(&new_m_capacity), sizeof(new_m_capacity));
+                reader.read(reinterpret_cast<char*>(&new_m_capacity), sizeof(new_m_capacity));
+                if(new_m_capacity > m_capacity) throw SerializationDeserializationError{"Current array has a smaller capacity compared to one in disk"};
+                if(new_counter > m_capacity) throw SerializationDeserializationError{"Data in Disk might be corrupted, m_capacity is lower than counter"};
+                // back to action
+                temp_arr = static_cast<T*>(::operator new(sizeof(T)*m_capacity));
+                while(items < new_counter){
+                    temp_arr[items].deserialize();
+                    ++items;
+                }
+                if constexpr(!std::is_trivially_destructible_v<T>) while(counter > 0) arr[--counter].~T();
+                ::operator delete(arr);
+                arr = temp_arr;
+                counter = new_counter;
+            }catch(const std::bad_alloc&){
+                throw;
+            }catch(...){
+                while(items > 0) temp_arr[--items].~T();
+                ::operator delete(temp_arr);
+                throw;
+            }
+        }else{
+            throw SerializationDeserializationError{"Can't Deserialize T object"};
+        }
     }
 
     // Array iterator func

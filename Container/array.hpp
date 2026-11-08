@@ -52,6 +52,7 @@ namespace Container{
             m_capacity;
         public:
             static constexpr std::size_t npos{static_cast<std::size_t>(-1)};
+            using serializable = std::true_type;
 
             Array();
             explicit Array(std::size_t reserve_space);
@@ -690,7 +691,7 @@ namespace Container{
                 writter.write(reinterpret_cast<const char*>(&counter), sizeof(counter));
                 for(std::size_t i{}; i<counter; ++i) arr[i].serialize(writter);
             }catch(...){
-                std::ostream::seekp(cursor);
+                writter.seekp(cursor);
                 throw;
             }
         }else{
@@ -709,7 +710,7 @@ namespace Container{
                 if(new_m_capacity > m_capacity) throw SerializationDeserializationError{"Current array has a smaller capacity compared to one in disk"};
                 if(new_counter > m_capacity) throw SerializationDeserializationError{"Data in Disk might be corrupted, m_capacity is lower than counter"};
                 // back to action
-                while(counter > 0) arr[--counter].~T();
+                // while(counter > 0) arr[--counter].~T(); We don't need to destroy the current elements since we are going to overwrite them with new data 
                 reader.read(reinterpret_cast<char*>(arr), sizeof(T)*new_counter);
                 counter = new_counter;
             }catch(...){
@@ -724,13 +725,14 @@ namespace Container{
             T* temp_arr{nullptr};
             try{
                 reader.read(reinterpret_cast<char*>(&new_m_capacity), sizeof(new_m_capacity));
-                reader.read(reinterpret_cast<char*>(&new_m_capacity), sizeof(new_m_capacity));
+                reader.read(reinterpret_cast<char*>(&new_counter), sizeof(new_counter));
                 if(new_m_capacity > m_capacity) throw SerializationDeserializationError{"Current array has a smaller capacity compared to one in disk"};
                 if(new_counter > m_capacity) throw SerializationDeserializationError{"Data in Disk might be corrupted, m_capacity is lower than counter"};
                 // back to action
                 temp_arr = static_cast<T*>(::operator new(sizeof(T)*m_capacity));
                 while(items < new_counter){
-                    temp_arr[items].deserialize();
+                    ::new(&temp_arr[items]) T();
+                    temp_arr[items].deserialize(reader);
                     ++items;
                 }
                 if constexpr(!std::is_trivially_destructible_v<T>) while(counter > 0) arr[--counter].~T();
